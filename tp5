@@ -1,0 +1,112 @@
+import findspark
+findspark.init()
+findspark.find()
+import pyspark
+findspark.find()
+
+# Importation
+
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+
+# Instantiation
+spark = SparkSession.builder.master("local").appName("FolksDF").getOrCreate()
+
+# Importation des fichiers
+Walmart = spark.read.option("header",'true').option("delimiter",",").csv("walmart_stock.csv")
+Walmart.show()
+# donc les noms de colonnes sont: Date, Open, Hight, Low, ..
+
+Walmart.columns
+
+Walmart.printSchema()
+# nullable = true : autorise les valeurs nulles
+
+Walmart2 = Walmart.withColumn("HV_Ratio", F.col("High")/F.col("Volume"))
+Walmart2.head() # juste la premiere ligne
+Walmart2.show(4) # les 4 premieres lignes
+
+# SQL
+Walmart2.createOrReplaceTempView("WalmartSQL") # transformation du data frame en table !!!!
+#spark.sql("""select Date from WalmartSQL order by High desc""").first() # solution 1
+spark.sql("""select Date from WalmartSQL order by High desc limit 1""").show() # solution 2
+
+# DSL donc en spark
+# Walmart2.orderBy(F.col("High").desc()).select(F.col("Date")).head() # solution 1
+Walmart2.select(F.col("Date")) \
+        .orderBy(F.col("High").desc()) \
+        .head() # solution 1 bis ( ressemble au SQL)
+       
+       # SQL
+spark.sql("""select mean(Close) as Moyenne from WalmartSQL""").show()
+
+# DSL
+#Walmart2.select("Close") \
+#        .summary("mean") \
+#        .show()  # solution 1
+Walmart2.agg(F.mean("Close") \
+        .alias("Moyenne")) \
+        .show() # solution 2 (on peut changer mean par avg)
+# SQL
+spark.sql("""select max(Volume), min(Volume) from WalmartSQL""").show()
+# DSL
+Walmart2.agg(F.max("Volume"),F.min("Volume")) \
+        .show()
+# SQL
+spark.sql("""select count(Date) from WalmartSQL where Close < '60' """).show()
+# DSL
+#Walmart2.filter(F.col("Close") < '60') \
+#        .agg(F.count("Date")) \ # faire l'aggregation apres le filter
+#        .show()  # solution 1
+
+Walmart2.filter(F.col("Close") < '60') \
+        .count()   # solution 2
+# SQL
+spark.sql(""" select round(
+                (select count(*) from WalmartSQL
+                where High>='80')
+                /
+                (count(*))
+                * 100
+                , 2
+            )
+as Percentage 
+from WalmartSQL
+""").show()
+# DSL
+Temp = Walmart2.filter(F.col("High")>='80') \
+        .agg(F.count("*").alias ("Comptage")) \
+        .collect()[0][0] 
+Walmart2.agg(F.round((Temp/F.count("*")*100),2).alias("Percentage")) \
+        .show()
+# SQL
+spark.sql(""" select max(High), substr(Date,1,4) as Annee from WalmartSQL group by Annee """).show() 
+# DSL
+# Partie 1 : crée une nouelle colonne Annee qui extrait l'annee depuis la variable Date
+Walmart3 = Walmart2.withColumn("Annee",F.substring("Date",1,4))
+Walmart3.select("Date", "Annee").show(4) 
+
+# Partie 2 : pour chaque annee, trouvé le max du prix coresspondant
+# group by AVANT le agg
+Walmart3.groupBy(F.col("Annee")) \
+        .agg(F.max("High")) \
+        .show()
+ 
+ #Q12
+ 
+ #SQL
+spark.sql(""" select mean(Close) as meanClosePerMonth, 
+                substr(Date,6,2) as Month from WalmartSQL 
+                group by Month 
+                order by Month asc """).show()
+# DSL
+# Partie 1 : crée une nouelle colonne Month qui extrait le mois depuis la variable Date
+Walmart3 = Walmart2.withColumn("Month",F.substring("Date",6,2))
+Walmart3.select("Date", "Month").show(4) 
+
+# Partie 2 : 
+
+Walmart3.groupBy(F.col("Month")) \
+        .agg(F.mean("Close").alias("Average Close per month")) \
+        .orderBy(F.col("Month").asc()) \
+        .show()
